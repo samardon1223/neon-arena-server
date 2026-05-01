@@ -1,9 +1,9 @@
 import * as Phaser from 'phaser';
 import { io } from 'socket.io-client';
 
-// ---> CHANGE THIS TO YOUR LOCAL IP <---
+// ---> CHANGE THIS TO YOUR LOCAL IP OR RENDER URL <---
 const SERVER_IP = 'https://phaser-server.onrender.com';
-const socket = io(`http://${SERVER_IP}:3000`);
+const socket = io(SERVER_IP); 
 
 class LobbyScene extends Phaser.Scene {
     constructor() { super('LobbyScene'); }
@@ -14,8 +14,18 @@ class LobbyScene extends Phaser.Scene {
 
         this.add.text(cx, cy - 100, 'NEON ARENA', { fontSize: '48px', fill: '#00ffcc', fontStyle: 'bold' }).setOrigin(0.5);
         this.status = this.add.text(cx, cy - 50, 'Connecting...', { fontSize: '18px', fill: '#ffaa00' }).setOrigin(0.5);
+        
+        // --> NEW: Live player count indicator for the assignment requirement
+        this.playerCountText = this.add.text(cx, cy - 15, 'Players in Arena: 0', { fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
 
         socket.on('connect', () => this.status.setText('Server Online - Ready').setFill('#00ffcc'));
+        
+        // --> NEW: Listen for lobby updates
+        socket.on('playerCountUpdate', (count) => {
+            if (this.playerCountText) {
+                this.playerCountText.setText(`Players in Arena: ${count}`);
+            }
+        });
 
         const inputEl = document.getElementById('playerName');
         inputEl.style.display = 'block';
@@ -119,7 +129,6 @@ class ArenaScene extends Phaser.Scene {
         });
 
         socket.on('playerShot', (data) => {
-            // Play sound locally when others shoot
             this.sound.play('shootSnd', { volume: 0.1 });
             this.spawnBullet(data.x, data.y, data.vx, data.vy, false);
         });
@@ -235,12 +244,11 @@ class ArenaScene extends Phaser.Scene {
     fireWeapon(pointer) {
         if (!this.myShip || this.isDead) return;
 
-        // --- ENFORCE 1-SECOND COOLDOWN ---
         let now = Date.now();
-        if (now - this.lastFiredTime < 1000) return; // Ignore input if < 1000ms
-        this.lastFiredTime = now; // Update timestamp
+        if (now - this.lastFiredTime < 1000) return; 
+        this.lastFiredTime = now; 
 
-        this.sound.play('shootSnd', { volume: 0.3 }); // Play sound
+        this.sound.play('shootSnd', { volume: 0.3 }); 
 
         if (this.isDesktop && pointer) {
             let worldX = pointer.x + this.cameras.main.scrollX;
@@ -303,7 +311,6 @@ class ArenaScene extends Phaser.Scene {
             }
         }
 
-        // Keep strictly inside the 2000x2000 grid
         this.myShip.container.x = Phaser.Math.Clamp(this.myShip.container.x, 20, 1980);
         this.myShip.container.y = Phaser.Math.Clamp(this.myShip.container.y, 20, 1980);
 
