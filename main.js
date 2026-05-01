@@ -1,323 +1,210 @@
 import * as Phaser from 'phaser';
 import { io } from 'socket.io-client';
 
-// ---> CHANGE THIS TO YOUR LOCAL IP OR RENDER URL <---
-const SERVER_IP = 'https://neon-arena-server-n1g4.onrender.com';
+const SERVER_IP = 'https://phaser-server.onrender.com'; // Keep your current Render URL here
 const socket = io(SERVER_IP); 
 
 class LobbyScene extends Phaser.Scene {
     constructor() { super('LobbyScene'); }
-
     create() {
-        const cx = this.cameras.main.centerX;
-        const cy = this.cameras.main.centerY;
-
-        this.add.text(cx, cy - 100, 'NEON ARENA', { fontSize: '48px', fill: '#00ffcc', fontStyle: 'bold' }).setOrigin(0.5);
-        this.status = this.add.text(cx, cy - 50, 'Connecting...', { fontSize: '18px', fill: '#ffaa00' }).setOrigin(0.5);
+        const cx = this.cameras.main.centerX, cy = this.cameras.main.centerY;
         
-        // --> NEW: Live player count indicator for the assignment requirement
-        this.playerCountText = this.add.text(cx, cy - 15, 'Players in Arena: 0', { fontSize: '16px', fill: '#ffffff' }).setOrigin(0.5);
+        this.add.text(cx, cy - 100, 'NEON ARENA', { fontSize: '48px', fill: '#00ffcc' }).setOrigin(0.5);
+        this.status = this.add.text(cx, cy - 50, 'Connecting...', { fill: '#ffaa00' }).setOrigin(0.5);
+        this.playerCount = this.add.text(cx, cy - 15, 'Players: 0', { fill: '#fff' }).setOrigin(0.5);
 
-        socket.on('connect', () => this.status.setText('Server Online - Ready').setFill('#00ffcc'));
-        
-        // --> NEW: Listen for lobby updates
-        socket.on('playerCountUpdate', (count) => {
-            if (this.playerCountText) {
-                this.playerCountText.setText(`Players in Arena: ${count}`);
-            }
-        });
+        socket.on('connect', () => this.status.setText('Ready').setFill('#00ffcc'));
+        socket.on('playerCountUpdate', (c) => this.playerCount.setText(`Players: ${c}`));
 
         const inputEl = document.getElementById('playerName');
         inputEl.style.display = 'block';
 
-        const joinBtn = this.add.rectangle(cx, cy + 60, 220, 50, 0x00ffcc).setInteractive();
-        this.add.text(cx, cy + 60, 'ENTER MATCH', { fontSize: '20px', fill: '#000', fontStyle: 'bold' }).setOrigin(0.5);
-
-        joinBtn.on('pointerdown', () => {
+        this.add.rectangle(cx, cy + 60, 220, 50, 0x00ffcc).setInteractive().on('pointerdown', () => {
             let name = inputEl.value.trim();
             if (!name) return alert("Enter a name!");
             inputEl.style.display = 'none';
             this.scene.start('ArenaScene', { playerName: name });
         });
+        this.add.text(cx, cy + 60, 'ENTER MATCH', { color: '#000', fontStyle: 'bold' }).setOrigin(0.5);
     }
 }
 
 class ArenaScene extends Phaser.Scene {
     constructor() { super('ArenaScene'); }
     init(data) { this.myName = data.playerName; }
-
+    
     preload() {
-        // Load Audio Assets
         this.load.audio('bgm', 'https://labs.phaser.io/assets/audio/oedipus_wizball_highscore.ogg');
         this.load.audio('shootSnd', 'https://labs.phaser.io/assets/audio/SoundEffects/blaster.mp3');
     }
 
     create() {
-        // --- AUDIO SETUP ---
         this.sound.play('bgm', { volume: 0.2, loop: true });
-
-        // --- COOLDOWN VARIABLE ---
-        this.lastFiredTime = 0;
-
-        // --- CODE-GENERATED PLAYER GRAPHICS ---
-        let g = this.make.graphics({ x: 0, y: 0, add: false });
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(20, 20, 20);
-        g.fillStyle(0x888888, 1);
-        g.fillRect(20, 15, 25, 10);
-        g.generateTexture('player_sprite', 50, 40);
+        this.lastFire = 0; this.players = {}; this.isDead = false;
 
         // Map Setup
         this.cameras.main.setBounds(0, 0, 2000, 2000);
         this.add.grid(1000, 1000, 2000, 2000, 50, 50, 0x0d0d0d, 1, 0x222222, 1);
 
-        this.playerMap = {};
-        this.isDead = false;
+        // Procedural Textures
+        let g = this.make.graphics({ add: false }).fillStyle(0xffffff).fillCircle(20, 20, 20).fillStyle(0x888888).fillRect(20, 15, 25, 10);
+        g.generateTexture('player_sprite', 50, 40);
 
-        // Bullet Pool
+        // Object Pooling for Bullets
         this.bullets = this.add.group({ classType: Phaser.GameObjects.Arc, maxSize: 40 });
-        for (let i = 0; i < 40; i++) {
-            this.bullets.add(this.add.circle(0, 0, 6, 0xffaa00).setActive(false).setVisible(false));
-        }
+        for(let i=0; i<40; i++) this.bullets.add(this.add.circle(0, 0, 6, 0xffaa00).setActive(false).setVisible(false));
 
-        // Leaderboard UI
-        this.add.rectangle(10, 10, 250, 150, 0x000000, 0.7).setOrigin(0).setScrollFactor(0).setDepth(100);
-        this.add.text(20, 20, 'LIVE LEADERBOARD', { fontSize: '16px', fill: '#00ffcc', fontStyle: 'bold' }).setScrollFactor(0).setDepth(100);
-        this.lbText = this.add.text(20, 45, 'Loading...', { fontSize: '14px', fill: '#fff', lineSpacing: 5 }).setScrollFactor(0).setDepth(100);
+        // UI Setup
+        this.add.rectangle(10, 10, 250, 150, 0x000, 0.7).setOrigin(0).setScrollFactor(0).setDepth(100);
+        this.lbText = this.add.text(20, 20, 'LEADERBOARD\nLoading...', { fill: '#0ff', lineSpacing: 5 }).setScrollFactor(0).setDepth(100);
 
-        // Death Screen UI
-        this.deathScreen = this.add.container(0, 0).setScrollFactor(0).setDepth(200).setVisible(false);
-        this.deathScreen.add(this.add.rectangle(this.cameras.main.centerX, this.cameras.main.centerY, 4000, 4000, 0xff0000, 0.5));
-        this.deathScreen.add(this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 50, 'YOU DIED', { fontSize: '50px', fill: '#fff', fontStyle: 'bold' }).setOrigin(0.5));
-        let exitBtn = this.add.rectangle(this.cameras.main.centerX, this.cameras.main.centerY + 50, 200, 50, 0x000000).setInteractive();
-        exitBtn.on('pointerdown', () => window.location.reload());
-        this.deathScreen.add(exitBtn);
-        this.deathScreen.add(this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Main Menu', { fontSize: '20px', fill: '#fff' }).setOrigin(0.5));
+        // Death Screen
+        this.deathUi = this.add.container(0, 0).setScrollFactor(0).setDepth(200).setVisible(false);
+        this.deathUi.add([
+            this.add.rectangle(this.cameras.main.centerX, this.cameras.main.centerY, 4000, 4000, 0xff0000, 0.5),
+            this.add.text(this.cameras.main.centerX, this.cameras.main.centerY, 'YOU DIED\nClick anywhere to Restart', { fontSize: '40px', align: 'center' }).setOrigin(0.5)
+        ]);
+        this.input.on('pointerdown', () => { if(this.isDead) window.location.reload(); });
 
         // --- NETWORK LISTENERS ---
-        socket.on('matchInit', (data) => {
-            Object.keys(data.players).forEach(id => {
-                if (id === socket.id) this.spawnMe(data.players[id]);
-                else this.spawnOpponent(data.players[id]);
-            });
-        });
-
+        socket.on('matchInit', (data) => Object.values(data.players).forEach(p => this.spawn(p, p.id === socket.id)));
+        
         socket.on('stateUpdate', (players) => {
-            Object.keys(players).forEach(id => {
-                let pData = players[id];
-                if (id === socket.id && this.myShip && !this.isDead) {
-                    this.updateHealthBar(this.myShip, pData.hp);
-                } else if (this.playerMap[id]) {
-                    if (pData.hp <= 0) {
-                        this.removeOpponent(id);
-                    } else {
-                        this.updateHealthBar(this.playerMap[id], pData.hp);
-                    }
-                } else if (id !== socket.id && pData.hp > 0) {
-                    this.spawnOpponent(pData);
-                }
+            Object.values(players).forEach(p => {
+                let obj = p.id === socket.id ? this.myShip : this.players[p.id];
+                if (obj && p.hp > 0) this.updateHp(obj, p.hp);
+                else if (obj && p.hp <= 0 && p.id !== socket.id) this.removePlayer(p.id);
+                else if (!obj && p.hp > 0 && p.id !== socket.id) this.spawn(p, false);
             });
         });
 
-        socket.on('playerMoved', (data) => {
-            const enemy = this.playerMap[data.id];
-            if (enemy) {
-                this.tweens.add({ targets: [enemy.container], x: data.x, y: data.y, duration: 50 });
-                enemy.container.rotation = data.rotation;
-                this.updateHealthBar(enemy, null);
+        socket.on('playerMoved', (p) => {
+            if (this.players[p.id]) {
+                this.tweens.add({ targets: this.players[p.id].cont, x: p.x, y: p.y, duration: 50 }); // Interpolation
+                this.players[p.id].cont.rotation = p.rotation;
             }
         });
 
-        socket.on('playerShot', (data) => {
-            this.sound.play('shootSnd', { volume: 0.1 });
-            this.spawnBullet(data.x, data.y, data.vx, data.vy, false);
-        });
+        socket.on('playerShot', (d) => { this.sound.play('shootSnd', { volume: 0.1 }); this.fire(d.x, d.y, d.vx, d.vy, false); });
+        socket.on('leaderboardSync', (arr) => this.lbText.setText('LEADERBOARD\n' + arr.slice(0,5).map((p,i)=>`${i+1}. ${p.name}: ${p.score}`).join('\n')));
+        socket.on('playerDisconnected', (id) => this.removePlayer(id));
+        socket.on('youDied', () => { this.isDead = true; this.myShip.cont.setVisible(false); this.deathUi.setVisible(true); });
+        socket.on('matchOver', (w) => { alert(`Winner: ${w}`); window.location.reload(); });
 
-        socket.on('leaderboardSync', (jsonArray) => {
-            let text = "";
-            jsonArray.slice(0, 5).forEach((p, i) => text += `${i + 1}. ${p.name}: ${Math.floor(p.score)} pts\n`);
-            this.lbText.setText(text);
-        });
-
-        socket.on('playerDisconnected', (id) => this.removeOpponent(id));
-
-        socket.on('youDied', () => {
-            this.isDead = true;
-            this.myShip.container.setVisible(false);
-            this.myShip.label.setVisible(false);
-            this.myShip.hpBg.setVisible(false);
-            this.myShip.hpBar.setVisible(false);
-            this.deathScreen.setVisible(true);
-        });
-
-        socket.on('matchOver', (winner) => {
-            alert(`Match Over! Winner: ${winner}`);
-            window.location.reload();
-        });
-
-        // Setup Controls
+        // Controls Setup
         this.isDesktop = this.sys.game.device.os.desktop;
         if (this.isDesktop) {
-            this.wasd = this.input.keyboard.addKeys({ W: 87, A: 65, S: 83, D: 68 });
-            this.input.on('pointerdown', (pointer) => this.fireWeapon(pointer));
-        } else {
-            this.setupMobileControls();
-        }
+            this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+            this.input.on('pointerdown', (ptr) => !this.isDead && this.playerShoot(ptr));
+        } else this.setupMobile();
 
         socket.emit('joinArena', this.myName);
     }
 
-    setupMobileControls() {
-        this.joyActive = false; this.joyAngle = 0; this.joyForce = 0;
-
-        const joyZone = this.add.zone(0, 0, this.cameras.main.width / 2, this.cameras.main.height).setOrigin(0).setInteractive().setScrollFactor(0).setDepth(50);
-        const base = this.add.circle(0, 0, 50, 0xffffff, 0.1).setVisible(false).setScrollFactor(0).setDepth(51);
-        const thumb = this.add.circle(0, 0, 25, 0x00ffcc, 0.4).setVisible(false).setScrollFactor(0).setDepth(52);
-
-        joyZone.on('pointerdown', (ptr) => { base.setPosition(ptr.x, ptr.y).setVisible(true); thumb.setPosition(ptr.x, ptr.y).setVisible(true); this.joyActive = true; });
-        joyZone.on('pointermove', (ptr) => {
-            if (ptr.isDown) {
-                let dist = Phaser.Math.Distance.Between(base.x, base.y, ptr.x, ptr.y);
-                this.joyAngle = Phaser.Math.Angle.Between(base.x, base.y, ptr.x, ptr.y);
-                let clampedDist = Math.min(dist, 40);
-                thumb.setPosition(base.x + Math.cos(this.joyAngle) * clampedDist, base.y + Math.sin(this.joyAngle) * clampedDist);
-                this.joyForce = clampedDist / 40;
-            }
-        });
-        joyZone.on('pointerup', () => { base.setVisible(false); thumb.setVisible(false); this.joyActive = false; this.joyForce = 0; });
-
-        const fireX = this.cameras.main.width - 90;
-        const fireY = this.cameras.main.height - 150;
-        const fireBtn = this.add.circle(fireX, fireY, 50, 0xff0000, 0.4).setInteractive().setScrollFactor(0).setDepth(50);
-        this.add.text(fireX, fireY, 'FIRE', { fontSize: '18px', fill: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(51);
-        fireBtn.on('pointerdown', () => this.fireWeapon(null));
+    spawn(info, isMe) {
+        let cont = this.add.container(info.x, info.y, [
+            this.add.circle(0, 0, 20, isMe ? 0x00aaff : 0xff3333), 
+            this.add.rectangle(20, 8, 25, 8, 0x888888)
+        ]);
+        let ui = {
+            lbl: this.add.text(info.x, info.y - 45, info.name, { fontSize: '14px', fill: isMe ? '#0ff' : '#fff' }).setOrigin(0.5),
+            bg: this.add.rectangle(info.x, info.y - 30, 40, 6, 0xf00),
+            bar: this.add.rectangle(info.x, info.y - 30, 40, 6, 0x0f0)
+        };
+        let obj = { cont, ...ui, hp: info.hp };
+        
+        if (isMe) { this.myShip = obj; this.cameras.main.startFollow(cont); } 
+        else this.players[info.id] = obj;
+        this.updateHp(obj, info.hp);
     }
 
-    createCharacterGraphic(x, y, isMe) {
-        let bodyColor = isMe ? 0x00aaff : 0xff3333;
-        let body = this.add.circle(0, 0, 20, bodyColor);
-        let gun = this.add.rectangle(20, 8, 25, 8, 0x888888);
-        return this.add.container(x, y, [body, gun]);
-    }
-
-    createUIElements(playerObj, info, isMe) {
-        playerObj.label = this.add.text(info.x, info.y - 45, info.name, { fontSize: '14px', fill: isMe ? '#00ffcc' : '#fff' }).setOrigin(0.5);
-        playerObj.hpBg = this.add.rectangle(info.x, info.y - 30, 40, 6, 0xff0000);
-        playerObj.hpBar = this.add.rectangle(info.x, info.y - 30, 40, 6, 0x00ff00);
-        playerObj.hp = info.hp;
-        this.updateHealthBar(playerObj, info.hp);
-    }
-
-    updateHealthBar(playerObj, newHp) {
-        if (newHp !== null) playerObj.hp = newHp;
-        let cont = playerObj.container;
-        if (playerObj.label) playerObj.label.setPosition(cont.x, cont.y - 45);
-        if (playerObj.hpBg) playerObj.hpBg.setPosition(cont.x, cont.y - 30);
-        if (playerObj.hpBar) {
-            playerObj.hpBar.setPosition(cont.x - 20 + ((40 * (playerObj.hp / 20)) / 2), cont.y - 30);
-            playerObj.hpBar.width = 40 * (playerObj.hp / 20);
+    removePlayer(id) {
+        if (this.players[id]) {
+            let p = this.players[id];
+            [p.cont, p.lbl, p.bg, p.bar].forEach(x => x.destroy());
+            delete this.players[id];
         }
     }
 
-    spawnMe(info) {
-        this.myShip = { container: this.createCharacterGraphic(info.x, info.y, true) };
-        this.createUIElements(this.myShip, info, true);
-        this.cameras.main.startFollow(this.myShip.container);
+    updateHp(obj, hp) {
+        obj.hp = hp; obj.lbl.setPosition(obj.cont.x, obj.cont.y - 45);
+        obj.bg.setPosition(obj.cont.x, obj.cont.y - 30);
+        obj.bar.setPosition(obj.cont.x - 20 + hp, obj.cont.y - 30).width = hp * 2; // Math simplified
     }
 
-    spawnOpponent(info) {
-        let container = this.createCharacterGraphic(info.x, info.y, false);
-        this.playerMap[info.id] = { container: container };
-        this.createUIElements(this.playerMap[info.id], info, false);
-    }
-
-    removeOpponent(id) {
-        if (this.playerMap[id]) {
-            this.playerMap[id].container.destroy();
-            this.playerMap[id].hpBg.destroy();
-            this.playerMap[id].hpBar.destroy();
-            this.playerMap[id].label.destroy();
-            delete this.playerMap[id];
+    playerShoot(ptr) {
+        if (Date.now() - this.lastFire < 1000) return;
+        this.lastFire = Date.now(); this.sound.play('shootSnd', { volume: 0.3 });
+        
+        if (this.isDesktop && ptr) {
+            this.myShip.cont.rotation = Phaser.Math.Angle.Between(this.myShip.cont.x, this.myShip.cont.y, ptr.worldX, ptr.worldY);
         }
+        let angle = this.myShip.cont.rotation;
+        let data = { x: this.myShip.cont.x + Math.cos(angle)*30, y: this.myShip.cont.y + Math.sin(angle)*30, vx: Math.cos(angle)*15, vy: Math.sin(angle)*15 };
+        
+        this.fire(data.x, data.y, data.vx, data.vy, true);
+        socket.emit('shoot', data);
     }
 
-    fireWeapon(pointer) {
-        if (!this.myShip || this.isDead) return;
-
-        let now = Date.now();
-        if (now - this.lastFiredTime < 1000) return; 
-        this.lastFiredTime = now; 
-
-        this.sound.play('shootSnd', { volume: 0.3 }); 
-
-        if (this.isDesktop && pointer) {
-            let worldX = pointer.x + this.cameras.main.scrollX;
-            let worldY = pointer.y + this.cameras.main.scrollY;
-            this.myShip.container.rotation = Phaser.Math.Angle.Between(this.myShip.container.x, this.myShip.container.y, worldX, worldY);
-        }
-
-        let vx = Math.cos(this.myShip.container.rotation) * 15;
-        let vy = Math.sin(this.myShip.container.rotation) * 15;
-
-        let barrelX = this.myShip.container.x + (Math.cos(this.myShip.container.rotation) * 30);
-        let barrelY = this.myShip.container.y + (Math.sin(this.myShip.container.rotation) * 30);
-
-        this.spawnBullet(barrelX, barrelY, vx, vy, true);
-        socket.emit('shoot', { x: barrelX, y: barrelY, vx: vx, vy: vy });
-    }
-
-    spawnBullet(x, y, vx, vy, isMine) {
+    fire(x, y, vx, vy, isMine) {
         let b = this.bullets.getFirstDead(false);
-        if (b) { b.setActive(true).setVisible(true).setPosition(x, y); b.vx = vx; b.vy = vy; b.isMine = isMine; }
+        if (b) Object.assign(b, {x, y, vx, vy, isMine}).setActive(true).setVisible(true);
+    }
+
+    setupMobile() {
+        this.joy = { active: false, angle: 0, force: 0 };
+        let zone = this.add.zone(0, 0, 1000, 2000).setOrigin(0).setInteractive().setScrollFactor(0);
+        let base = this.add.circle(0,0,50,0xffffff,0.1).setVisible(false).setScrollFactor(0);
+        let thumb = this.add.circle(0,0,25,0x00ffcc,0.4).setVisible(false).setScrollFactor(0);
+
+        zone.on('pointerdown', p => { base.setPosition(p.x, p.y).setVisible(true); thumb.copyPosition(base).setVisible(true); this.joy.active = true; });
+        zone.on('pointermove', p => {
+            if(!p.isDown) return;
+            let dist = Math.min(Phaser.Math.Distance.Between(base.x, base.y, p.x, p.y), 40);
+            this.joy.angle = Phaser.Math.Angle.Between(base.x, base.y, p.x, p.y);
+            this.joy.force = dist / 40;
+            thumb.setPosition(base.x + Math.cos(this.joy.angle)*dist, base.y + Math.sin(this.joy.angle)*dist);
+        });
+        zone.on('pointerup', () => { base.setVisible(false); thumb.setVisible(false); this.joy.active = false; });
+
+        this.add.circle(this.cameras.main.width - 90, this.cameras.main.height - 150, 50, 0xff0000, 0.4)
+            .setInteractive().setScrollFactor(0).on('pointerdown', () => this.playerShoot());
     }
 
     update() {
         if (!this.myShip || this.isDead) return;
+        let ship = this.myShip.cont, speed = 5, moved = false;
 
-        // Bullets & Hit Detection
-        this.bullets.getChildren().forEach(b => {
-            if (b.active) {
-                b.x += b.vx; b.y += b.vy;
-                if (b.isMine) {
-                    Object.keys(this.playerMap).forEach(id => {
-                        let enemy = this.playerMap[id].container;
-                        if (Math.abs(b.x - enemy.x) < 30 && Math.abs(b.y - enemy.y) < 30) {
-                            b.setActive(false).setVisible(false);
-                            socket.emit('playerTagged', id);
-                        }
-                    });
-                }
-                if (b.x < 0 || b.x > 2000 || b.y < 0 || b.y > 2000) b.setActive(false).setVisible(false);
+        // Bullet Logic & Collision
+        this.bullets.getChildren().filter(b => b.active).forEach(b => {
+            b.x += b.vx; b.y += b.vy;
+            if (b.isMine) {
+                Object.keys(this.players).forEach(id => {
+                    if (Math.hypot(b.x - this.players[id].cont.x, b.y - this.players[id].cont.y) < 30) {
+                        b.setActive(false).setVisible(false); socket.emit('playerTagged', id);
+                    }
+                });
             }
+            if (b.x < 0 || b.x > 2000 || b.y < 0 || b.y > 2000) b.setActive(false).setVisible(false);
         });
 
-        let speed = 5; let moved = false;
-
-        if (!this.isDesktop && this.joyActive) {
-            this.myShip.container.x += Math.cos(this.joyAngle) * speed * this.joyForce;
-            this.myShip.container.y += Math.sin(this.joyAngle) * speed * this.joyForce;
-            this.myShip.container.rotation = this.joyAngle;
-            moved = true;
+        // Movement Math
+        if (!this.isDesktop && this.joy.active) {
+            ship.x += Math.cos(this.joy.angle) * speed * this.joy.force;
+            ship.y += Math.sin(this.joy.angle) * speed * this.joy.force;
+            ship.rotation = this.joy.angle; moved = true;
         } else if (this.isDesktop) {
-            if (this.wasd.A.isDown) { this.myShip.container.x -= speed; moved = true; }
-            if (this.wasd.D.isDown) { this.myShip.container.x += speed; moved = true; }
-            if (this.wasd.W.isDown) { this.myShip.container.y -= speed; moved = true; }
-            if (this.wasd.S.isDown) { this.myShip.container.y += speed; moved = true; }
-
+            if (this.wasd.A.isDown) { ship.x -= speed; moved = true; }
+            if (this.wasd.D.isDown) { ship.x += speed; moved = true; }
+            if (this.wasd.W.isDown) { ship.y -= speed; moved = true; }
+            if (this.wasd.S.isDown) { ship.y += speed; moved = true; }
             if (moved && !this.input.activePointer.isDown) {
-                let dx = (this.wasd.D.isDown ? 1 : 0) - (this.wasd.A.isDown ? 1 : 0);
-                let dy = (this.wasd.S.isDown ? 1 : 0) - (this.wasd.W.isDown ? 1 : 0);
-                this.myShip.container.rotation = Math.atan2(dy, dx);
+                ship.rotation = Math.atan2((this.wasd.S.isDown?1:0) - (this.wasd.W.isDown?1:0), (this.wasd.D.isDown?1:0) - (this.wasd.A.isDown?1:0));
             }
         }
 
-        this.myShip.container.x = Phaser.Math.Clamp(this.myShip.container.x, 20, 1980);
-        this.myShip.container.y = Phaser.Math.Clamp(this.myShip.container.y, 20, 1980);
-
-        if (moved) {
-            this.updateHealthBar(this.myShip, null);
-            socket.emit('playerMovement', { x: this.myShip.container.x, y: this.myShip.container.y, rotation: this.myShip.container.rotation });
-        }
+        ship.x = Phaser.Math.Clamp(ship.x, 20, 1980); ship.y = Phaser.Math.Clamp(ship.y, 20, 1980);
+        if (moved) { this.updateHp(this.myShip, this.myShip.hp); socket.emit('playerMovement', { x: ship.x, y: ship.y, rotation: ship.rotation }); }
     }
 }
 
