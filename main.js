@@ -2,7 +2,7 @@ import * as Phaser from 'phaser';
 import { io } from 'socket.io-client';
 
 // ---> CHANGE THIS TO YOUR LOCAL IP OR RENDER URL <---
-const SERVER_IP = 'https://phaser-server.onrender.com';
+const SERVER_IP = 'https://neon-arena-server-n1g4.onrender.com';
 const socket = io(SERVER_IP); 
 
 class LobbyScene extends Phaser.Scene {
