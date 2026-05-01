@@ -7,10 +7,9 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
-
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
-// Upstash DB Connection
+// Upstash DB Connection (Updated with your specific keys)
 const redis = new Redis({
     url: 'https://meet-satyr-111648.upstash.io',
     token: 'gQAAAAAAAbQgAAIgcDFmYjEyMjBjOGNjYmQ0ZTczYjllOWFhMjMyOTAzYTRmNA',
@@ -18,7 +17,6 @@ const redis = new Redis({
 
 const JSON_LEADERBOARD_KEY = "bca_assignment_leaderboard"; 
 const ROOM = "NEON_ARENA";
-
 let localPlayers = {}; 
 
 function getSortedLeaderboard() {
@@ -67,6 +65,9 @@ setInterval(() => {
 
 io.on('connection', (socket) => {
     
+    // --> NEW: Send the current player count to the lobby immediately on connect
+    socket.emit('playerCountUpdate', Object.keys(localPlayers).length);
+
     socket.on('joinArena', (name) => {
         if (!name) return;
         localPlayers[socket.id] = { 
@@ -78,6 +79,9 @@ io.on('connection', (socket) => {
         };
         socket.join(ROOM);
 
+        // --> NEW: Broadcast updated count to everyone's lobby
+        io.emit('playerCountUpdate', Object.keys(localPlayers).length);
+
         socket.emit('matchInit', { players: localPlayers });
         io.to(ROOM).emit('stateUpdate', localPlayers);
         io.to(ROOM).emit('leaderboardSync', getSortedLeaderboard());
@@ -86,8 +90,9 @@ io.on('connection', (socket) => {
 
     socket.on('playerMovement', (data) => {
         if (localPlayers[socket.id]) {
-            localPlayers[socket.id].x = data.x;
-            localPlayers[socket.id].y = data.y;
+            // --> NEW: Server-side clamping to prevent out-of-bounds exploits
+            localPlayers[socket.id].x = Math.max(20, Math.min(1980, data.x));
+            localPlayers[socket.id].y = Math.max(20, Math.min(1980, data.y));
             localPlayers[socket.id].rotation = data.rotation;
             socket.to(ROOM).emit('playerMoved', localPlayers[socket.id]); 
         }
@@ -100,24 +105,34 @@ io.on('connection', (socket) => {
         let target = localPlayers[targetId];
 
         if (shooter && target && target.hp > 0) {
-            target.hp -= 1;
-            target.lastHit = Date.now();
-            shooter.score += 10;
+            // --> NEW: Server-side logic validation. Checks if shooter is reasonably close to target.
+            // This prevents hackers from killing players across the map.
+            let distance = Math.hypot(shooter.x - target.x, shooter.y - target.y);
             
-            if (target.hp <= 0) {
-                target.hp = 0;
-                io.to(target.id).emit('youDied');
-                checkWinCondition();
-            }
+            if (distance < 1000) { // 1000px is generous for lag compensation
+                target.hp -= 1;
+                target.lastHit = Date.now();
+                shooter.score += 10;
+                
+                if (target.hp <= 0) {
+                    target.hp = 0;
+                    io.to(target.id).emit('youDied');
+                    checkWinCondition();
+                }
 
-            io.to(ROOM).emit('stateUpdate', localPlayers);
-            io.to(ROOM).emit('leaderboardSync', getSortedLeaderboard());
-            syncUpstash(); 
+                io.to(ROOM).emit('stateUpdate', localPlayers);
+                io.to(ROOM).emit('leaderboardSync', getSortedLeaderboard());
+                syncUpstash(); 
+            }
         }
     });
 
     socket.on('disconnect', () => {
         delete localPlayers[socket.id];
+        
+        // --> NEW: Broadcast updated count to everyone's lobby
+        io.emit('playerCountUpdate', Object.keys(localPlayers).length);
+        
         checkWinCondition();
         io.to(ROOM).emit('playerDisconnected', socket.id);
         io.to(ROOM).emit('leaderboardSync', getSortedLeaderboard());
