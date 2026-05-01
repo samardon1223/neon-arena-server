@@ -1,0 +1,20 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@upstash/redis": "^1.37.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "express-http-proxy": "^2.1.2",
+    "socket.io": "^4.8.3"
+  }
+}
