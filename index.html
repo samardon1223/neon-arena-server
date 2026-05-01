@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Multiplayer Arena</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0d0d0d;
+            overflow: hidden;
+            height: 100vh;
+            touch-action: none;
+            font-family: sans-serif;
+        }
+
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        input {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #00ffcc;
+            background: #111;
+            color: #fff;
+            text-align: center;
+            z-index: 1000;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <input id="playerName" type="text" placeholder="Enter Name..." autocomplete="off">
+    <div id="game-container"></div>
+    <script type="module" src="/main.js"></script>
+</body>
+</html>
